@@ -19,265 +19,268 @@ This file is part of pyzwave.
 
 from hamcrest import *
 
+from zwave.packet import Packet
 from zwave.message import Message
-from zwave.message import MessageAck
-from zwave.message import MessageNak
-from zwave.message import MessageParser
-from zwave.message import MessageParserBadChecksum
-from zwave.message import MessageParserUnkownMessageType
-from zwave.message import MessageParserUnkownPreamble
-from zwave.message import MessageParserMessageTooShort
+from zwave.message import SerialAPIGetCapabilities
+from zwave.message import SerialAPIGetInitData
+from zwave.message import ZWGetControllerCapabilities
 
 
 class TestMessage(object):
 
-    def test_ack_message(self):
-        """Message only with preamble"""
-        message = MessageAck()
-        assert_that(message.preamble, equal_to(0x06))
-        assert_that(message.length, equal_to(None))
-        assert_that(message.message_type, equal_to(None))
-        assert_that(message.controller_message_type, equal_to(None))
-        assert_that(message.body, has_length(0))
-        assert_that(message.checksum, equal_to(None))
-        assert_that(message.validate_checksum(), equal_to(True))
+    def test_message(self):
+        """Message creation from packet"""
+        packet = Packet(0x03, length=0x23, packet_type=0x12, message_type=0x13,
+                        body=[0x12, 0x32], checksum=0x13)
+        message = Message(packet)
 
-        # Check contents
-        assert_that(message.bytes(), equal_to(bytearray([0x06])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (message, message)
-
-    def test_partial_message(self):
-        """Partial messages from errors"""
-
-        ############################# Only length ##############################
-        message = Message(0x01, length=0x03)
-
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(0x03))
-        assert_that(message.message_type, equal_to(None))
-        assert_that(message.controller_message_type, equal_to(None))
-        assert_that(message.body, has_length(0))
-        assert_that(message.checksum, equal_to(None))
-        assert_that(message.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(message.bytes(), equal_to(bytearray([0x01, 0x03])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (message, message)
-
-        ########################## With message type ###########################
-        message = Message(0x01, length=0x03, message_type=0x01)
-
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(0x03))
-        assert_that(message.message_type, equal_to(0x01))
-        assert_that(message.controller_message_type, equal_to(None))
-        assert_that(message.body, has_length(0))
-        assert_that(message.checksum, equal_to(None))
-        assert_that(message.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(message.bytes(), equal_to(bytearray([0x01, 0x03, 0x01])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (message, message)
-
-        ##################### With controller message type #####################
-        message = Message(0x01, length=0x03, message_type=0x01,
-                          controller_message_type=0x02)
-
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(0x03))
-        assert_that(message.message_type, equal_to(0x01))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, has_length(0))
-        assert_that(message.checksum, equal_to(None))
-        assert_that(message.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(message.bytes(), equal_to(bytearray([0x01, 0x03, 0x01,
-                                                         0x02])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (message, message)
-
-        ############################## With body ###############################
-        message = Message(0x01, length=0x03, message_type=0x01,
-                          controller_message_type=0x02,
-                          body=bytearray([0x04, 0x05]))
-
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(0x03))
-        assert_that(message.message_type, equal_to(0x01))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, equal_to(bytearray([0x04, 0x05])))
-        assert_that(message.checksum, equal_to(None))
-        assert_that(message.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(message.bytes(), equal_to(bytearray([0x01, 0x03, 0x01,
-                                                         0x02, 0x04, 0x05])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (message, message)
-
-        ############################ With checksum #############################
-        message = Message(0x01, length=0x03, message_type=0x01,
-                          controller_message_type=0x02,
-                          body=bytearray([0x04, 0x05]), checksum=0x34)
-
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(0x03))
-        assert_that(message.message_type, equal_to(0x01))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, equal_to(bytearray([0x04, 0x05])))
-        assert_that(message.checksum, equal_to(0x34))
-        assert_that(message.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(message.bytes(), equal_to(bytearray([0x01, 0x03, 0x01,
-                                                         0x02, 0x04, 0x05,
-                                                         0x34])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (message, message)
-
-    def test_create_message_no_body(self):
-        """Create message with no body"""
-        message = Message.create(message_type=0x00,
-                                 controller_message_type=0x02)
-
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(3))
-        assert_that(message.message_type, equal_to(0x00))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, has_length(0))
-        assert_that(message.checksum, equal_to(0xfe))
-        assert_that(message.validate_checksum(), equal_to(True))
-
-    def test_create_message_with_body(self):
-        """Create message with a body"""
-        # NOTE: bad preamble, but continue
-        message = Message.create(preamble=0x04, message_type=0x00,
-                                 controller_message_type=0x02,
-                                 body=bytearray([0x45, 0x78]))
-
-        assert_that(message.preamble, equal_to(0x04))
-        assert_that(message.length, equal_to(5))
-        assert_that(message.message_type, equal_to(0x00))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, equal_to(bytearray([0x45, 0x78])))
-        assert_that(message.checksum, equal_to(0xc5))
-        assert_that(message.validate_checksum(), equal_to(True))
+        # Check fields
+        assert_that((packet.preamble, packet.length, packet.packet_type,
+                     packet.message_type, packet.body, packet.checksum),
+                    equal_to((0x03, 0x23, 0x12, 0x13, [0x12, 0x32], 0x13)))
 
 
-class TestMessageParser(object):
+class TestSerialAPIGetCapabilities(object):
 
-    def setup(self):
-        self.parser = MessageParser()
+    def test_bad_creation(self):
+        """SerialAPIGetCapabilities bad packet"""
+        body = [0x10, 0x20, 0x35, 0x86, 0x19, 0xa7, 0x87, 0x23,
+                0x07, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0x05,
+                0x00, 0x80 ]
+        # OK Packet
+        packet = Packet(0x01, length=0x2b, packet_type=0x01, message_type=0x07,
+                        body=body, checksum=0xe1)
+        message = SerialAPIGetCapabilities(packet)
 
-    def parse_message(self, bs):
-        for b in bs[0:-1]:
-            message = self.parser.update(bytearray([b]))
-            assert_that(message, equal_to(None))
-        return self.parser.update(bytearray([bs[-1]]))
+        # Bad preamble
+        packet.preamble = 0x00
+        assert_that(calling(SerialAPIGetCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.preamble = 0x01
 
-    def test_unknown_preamble(self):
-        """Unknown preamble"""
-        assert_that(calling(self.parser.update).with_args(b'\x02'),
-                    raises(MessageParserUnkownPreamble))
+        # Bad length
+        packet.length = 0x24
+        assert_that(calling(SerialAPIGetCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.length = 0x2b
 
-    def test_unknown_message_type(self):
-        """Unknown message type"""
-        # SOF
-        assert_that(self.parser.update(b'\x01'), equal_to(None))
-        # Length
-        assert_that(self.parser.update(b'\x03'), equal_to(None))
+        # Bad packet type
+        packet.packet_type = 0x00
+        assert_that(calling(SerialAPIGetCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.packet_type = 0x01
+
         # Bad message type
-        assert_that(calling(self.parser.update).with_args(b'\x02'),
-                    raises(MessageParserUnkownMessageType))
+        packet.message_type = 0x03
+        assert_that(calling(SerialAPIGetCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.message_type = 0x07
 
-    def test_ack(self):
-        """ACK message"""
-        message = self.parser.update(b'\x06')
-        assert_that(message, instance_of(MessageAck))
+    def test_good_creation(self):
+        """SerialAPIGetCapabilities packet parsing"""
+        body = [0x10, 0x20, 0x35, 0x86, 0x19, 0xa7, 0x87, 0x23,
+                0x07, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0x05,
+                0x00, 0x80 ]
+        # OK Packet
+        packet = Packet(0x01, length=0x2b, packet_type=0x01, message_type=0x07,
+                        body=body, checksum=0xe1)
+        message = SerialAPIGetCapabilities(packet)
 
-    def test_nak(self):
-        """NAK message"""
-        message = self.parser.update(b'\x15')
-        assert_that(message, instance_of(MessageNak))
+        # Check version/manufacturer/product type/id
+        assert_that((message.version, message.manufacturer_id,
+                     message.product_type, message.product_id),
+                    equal_to((0x2010, 0x3586, 0x19a7, 0x8723)))
 
-    def test_bad_checksum(self):
-        """Bad checksum"""
-        message = (b'\x01\x25\x01\x02\x05\x00\x1d\x07\x00\x00\x00\x00\x00\x00'
-                   b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-                   b'\x00\x00\x00\x11\x00\x27\x00\x14\x05\x00\xe0')
-        assert_that(calling(self.parse_message).with_args(message),
-                    raises(MessageParserBadChecksum))
+        # Check body
+        assert_that(message.bitmap_bytes, has_length(32))
+        assert_that(message.bitmap_bytes, equal_to(body[8:]))
 
-    def test_bad_length_message(self):
-        """Edge case zero length message"""
-        message = (b'\x01\x00')
-        assert_that(calling(self.parse_message).with_args(message),
-                    raises(MessageParserMessageTooShort))
+        # Check supported message types
+        assert_that(message.message_types, equal_to(
+                [1, 2, 3, 10, 97, 98, 99, 102, 104, 225, 232, 233, 235, 256 ]))
 
-        message = (b'\x01\x01\x01')
-        assert_that(calling(self.parse_message).with_args(message),
-                    raises(MessageParserMessageTooShort))
+        for x in range(256):
+            assert_that(message.supports_message_type(x),
+                        equal_to(x in message.message_types))
 
-        message = (b'\x01\x02\x01\x02')
-        assert_that(calling(self.parse_message).with_args(message),
-                    raises(MessageParserMessageTooShort))
+    def test_create_request(self):
+        """SerialAPIGetCapabilities create request"""
+        packet = SerialAPIGetCapabilities.create_request()
+        assert_that(packet.bytes(), equal_to(b'\x01\x03\x00\x07\xfb'))
 
-    def test_three_length_message(self):
-        """Edge case minimum"""
-        assert_that(self.parser.update(b'\x01'), equal_to(None))
-        assert_that(self.parser.update(b'\x03'), equal_to(None))
-        assert_that(self.parser.update(b'\x01'), equal_to(None))
-        assert_that(self.parser.update(b'\x02'), equal_to(None))
-        message = self.parser.update(b'\xff')
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(3))
-        assert_that(message.message_type, equal_to(0x01))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, has_length(0))
-        assert_that(message.checksum, equal_to(0xff))
 
-    def test_four_length_message(self):
-        """Edge case minimum + 1"""
-        assert_that(self.parser.update(b'\x01'), equal_to(None))
-        assert_that(self.parser.update(b'\x04'), equal_to(None))
-        assert_that(self.parser.update(b'\x01'), equal_to(None))
-        assert_that(self.parser.update(b'\x02'), equal_to(None))
-        assert_that(self.parser.update(b'\x03'), equal_to(None))
-        message = self.parser.update(b'\xfb')
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(4))
-        assert_that(message.message_type, equal_to(0x01))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, equal_to(bytearray([0x03])))
-        assert_that(message.checksum, equal_to(0xfb))
+class TestSerialAPIGetInitData(object):
 
-    def test_full_message(self):
-        """Full message parsing"""
+    def test_bad_creation(self):
+        """SerialAPIGetInitData bad packet"""
+        body = [0x15, 0x23, 0x1d, 
+                0x07, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81,
+                0x05, 0x00]
+        # OK Packet
+        packet = Packet(0x01, length=0x25, packet_type=0x01, message_type=0x02,
+                        body=body, checksum=0xe1)
+        message = SerialAPIGetInitData(packet)
 
-        # Discovery message used as sample
-        message = self.parse_message(b'\x01\x25\x01\x02\x05\x00\x1d\x07\x00'
-                                     b'\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-                                     b'\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-                                     b'\x00\x00\x00\x00\x11\x00\x27\x00\x14'
-                                     b'\x05\x00\xe1')
-        assert_that(message.preamble, equal_to(0x01))
-        assert_that(message.length, equal_to(0x25))
-        assert_that(message.message_type, equal_to(0x01))
-        assert_that(message.controller_message_type, equal_to(0x02))
-        assert_that(message.body, equal_to(b'\x05\x00\x1d\x07\x00\x00\x00\x00'
-                                           b'\x00\x00\x00\x00\x00\x00\x00\x00'
-                                           b'\x00\x00\x00\x00\x00\x00\x00\x00'
-                                           b'\x00\x00\x00\x11\x00\x27\x00\x14'
-                                           b'\x05\x00'))
-        assert_that(message.checksum, equal_to(0xe1))
+        # Bad preamble
+        packet.preamble = 0x00
+        assert_that(calling(SerialAPIGetInitData).with_args(packet),
+                    raises(ValueError))
+        packet.preamble = 0x01
+
+        # Bad length
+        packet.length = 0x24
+        assert_that(calling(SerialAPIGetInitData).with_args(packet),
+                    raises(ValueError))
+        packet.length = 0x25
+
+        # Bad packet type
+        packet.packet_type = 0x00
+        assert_that(calling(SerialAPIGetInitData).with_args(packet),
+                    raises(ValueError))
+        packet.packet_type = 0x01
+
+        # Bad message type
+        packet.message_type = 0x03
+        assert_that(calling(SerialAPIGetInitData).with_args(packet),
+                    raises(ValueError))
+        packet.message_type = 0x02
+
+        # Bad body bitmap length
+        packet.body[2] = 0x1c
+        assert_that(calling(SerialAPIGetInitData).with_args(packet),
+                    raises(ValueError))        
+        packet.body[2] = 0x1d
+
+    def test_good_creation(self):
+        """SerialAPIGetInitData parsing"""
+        body = [0x15, 0x23, 0x1d, 
+                0x07, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81,
+                0x05, 0x00]
+        packet = Packet(0x01, length=0x25, packet_type=0x01, message_type=0x02,
+                        body=body, checksum=0xe1)
+        message = SerialAPIGetInitData(packet)
+
+        assert_that(message.version, equal_to(0x15))
+        assert_that(message.capabilities, equal_to(0x23))
+
+        assert_that(message.nodes, equal_to([1, 2, 3, 10, 97, 98, 99, 102, 104,
+                                             225, 232]))
+
+        # Test capabilities
+        message.capabilities = 0x04
+        assert_that(message.secondary, equal_to(True))
+        assert_that(message.static_update, equal_to(False))
+
+        message.capabilities = 0x08
+        assert_that(message.secondary, equal_to(False))
+        assert_that(message.static_update, equal_to(True))
+
+        message.capabilities = 0x0c
+        assert_that(message.secondary, equal_to(True))
+        assert_that(message.static_update, equal_to(True))
+
+        message.capabilities = 0xf3
+        assert_that(message.secondary, equal_to(False))
+        assert_that(message.static_update, equal_to(False))
+
+    def test_create_request(self):
+        """SerialAPIGetInitData create request"""
+        packet = SerialAPIGetInitData.create_request()
+        assert_that(packet.bytes(), equal_to(b'\x01\x03\x00\x02\xfe'))
+
+
+class TestZWGetControllerCapabilities(object):
+
+    def test_bad_creation(self):
+        """ZWGetControllerCapabilities bad packet"""
+        body = [0x0f]
+        # OK Packet
+        packet = Packet(0x01, length=0x04, packet_type=0x01, message_type=0x05,
+                        body=body, checksum=0xe1)
+        message = ZWGetControllerCapabilities(packet)
+
+        # Bad preamble
+        packet.preamble = 0x00
+        assert_that(calling(ZWGetControllerCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.preamble = 0x01
+
+        # Bad length
+        packet.length = 0x03
+        assert_that(calling(ZWGetControllerCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.length = 0x04
+
+        # Bad packet type
+        packet.packet_type = 0x00
+        assert_that(calling(ZWGetControllerCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.packet_type = 0x01
+
+        # Bad message type
+        packet.message_type = 0x03
+        assert_that(calling(ZWGetControllerCapabilities).with_args(packet),
+                    raises(ValueError))
+        packet.message_type = 0x05
+
+    def test_good_creation(self):
+        """ZWGetControllerCapabilities parsing"""
+        body = [0x0f]
+        # OK Packet
+        packet = Packet(0x01, length=0x04, packet_type=0x01, message_type=0x05,
+                        body=body, checksum=0xe1)
+        message = ZWGetControllerCapabilities(packet)
+
+        assert_that(message.capabilities, equal_to(0x0f))
+
+        # Test capabilities
+        message.capabilities = 0x01
+        caps = (message.secondary, message.non_standard_home_id,
+                message.suc_id_server, message.was_primary,
+                message.static_update_controller)
+        assert_that(caps, equal_to((True, False, False, False, False)))
+
+        message.capabilities = 0x02
+        caps = (message.secondary, message.non_standard_home_id,
+                message.suc_id_server, message.was_primary,
+                message.static_update_controller)
+        assert_that(caps, equal_to((False, True, False, False, False)))
+
+        message.capabilities = 0x04
+        caps = (message.secondary, message.non_standard_home_id,
+                message.suc_id_server, message.was_primary,
+                message.static_update_controller)
+        assert_that(caps, equal_to((False, False, True, False, False)))
+
+        message.capabilities = 0x08
+        caps = (message.secondary, message.non_standard_home_id,
+                message.suc_id_server, message.was_primary,
+                message.static_update_controller)
+        assert_that(caps, equal_to((False, False, False, True, False)))
+
+        message.capabilities = 0x10
+        caps = (message.secondary, message.non_standard_home_id,
+                message.suc_id_server, message.was_primary,
+                message.static_update_controller)
+        assert_that(caps, equal_to((False, False, False, False, True)))
+
+        message.capabilities = 0x1f
+        caps = (message.secondary, message.non_standard_home_id,
+                message.suc_id_server, message.was_primary,
+                message.static_update_controller)
+        assert_that(caps, equal_to((True, True, True, True, True)))
+
+    def test_create_request(self):
+        """ZWGetControllerCapabilities create request"""
+        packet = ZWGetControllerCapabilities.create_request()
+        assert_that(packet.bytes(), equal_to(b'\x01\x03\x00\x05\xf9'))
+
 

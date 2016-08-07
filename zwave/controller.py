@@ -19,33 +19,69 @@ This file is part of pyzwave.
 
 import serial
 
-from .message import MessageParser
-
 import logging
+
+from .packet import PacketACK
+from .packet import PacketParser
+from .packet import Preamble
+
 
 logger = logging.getLogger(__name__)
 
+
 class ZWaveController(object):
-    """docstring for ZWaveController"""
+    """Interfaces with serial device controller to read/write packets
+
+    """
 
     def __init__(self, path):
+        """
+        Arguments:
+            path (str): path to serial device
+
+        Raises:
+            serial.serialutil.SerialException: if failed to open device
+
+        """
         super(ZWaveController, self).__init__()
         self.path = path
-        self.device = s = serial.Serial(port=self.path, baudrate=115200,
-                                        rtscts=True, dsrdtr=True)
-        self.message_parser = MessageParser()
+        self.device = serial.Serial(port=self.path, baudrate=115200,
+                                    rtscts=True, dsrdtr=True)
+        self.packet_parser = PacketParser()
 
     def read(self):
-        message = None
-        while message is None:
-            b = self.device.read()
-            message = self.message_parser.update(b)
-        return message
+        """Read a packet from the serial device. Blocking.
 
-    def write(self, message):
+        Return:
+            Packet
+
+        Raises:
+            ValueError: if bad byte value not in range of [0, 255]
+            zwave.packet.PacketParserException: if parsing exception occured
+
+        """
+        packet = None
+        while packet is None:
+            b = self.device.read()
+            n = int.from_bytes(b, byteorder='little')
+            packet = self.packet_parser.update(n)
+        if packet.preamble == Preamble.SOF:
+            self.write(PacketACK())
+        return packet
+
+    def write(self, packet):
+        """Write a packet to the serial device.
+
+        Arguments:
+            packet (Packet): to write
+
+        """
         # Get bytes
-        to_write = message.bytes()
+        to_write = packet.bytes()
         # Add newline
         to_write.append(ord('\n'))
+        # Write!
         self.device.write(to_write)
 
+    def close(self):
+        self.device.close()
