@@ -29,6 +29,12 @@ from .packet import Preamble
 logger = logging.getLogger(__name__)
 
 
+class Transaction(object):
+
+    def __init__(self, packet):
+        pass
+
+
 class ZWaveController(object):
     """Interfaces with serial device controller to read/write packets
 
@@ -65,6 +71,7 @@ class ZWaveController(object):
             b = self.device.read()
             n = int.from_bytes(b, byteorder='little')
             packet = self.packet_parser.update(n)
+        # Auto ACK SOF
         if packet.preamble == Preamble.SOF:
             self.write(PacketACK())
         return packet

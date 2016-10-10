@@ -19,145 +19,249 @@ This file is part of pyzwave.
 
 from hamcrest import *
 
+from zwave.packet import MessageType
 from zwave.packet import Packet
 from zwave.packet import PacketACK
-from zwave.packet import PacketNAK
 from zwave.packet import PacketCAN
+from zwave.packet import PacketNAK
 from zwave.packet import PacketParser
 from zwave.packet import PacketParserBadChecksum
-from zwave.packet import PacketParserUnknownType
-from zwave.packet import PacketParserUnknownPreamble
 from zwave.packet import PacketParserBadLength
+from zwave.packet import PacketParserUnknownMessageType
+from zwave.packet import PacketParserUnknownPacketType
+from zwave.packet import PacketParserUnknownPreamble
+from zwave.packet import PacketType
+from zwave.packet import Preamble
 
 
 class TestPacket(object):
 
     def test_ack_message(self):
-        """Message only with preamble"""
+        """Create PacketACK"""
         packet = PacketACK()
 
         # Check fields
         assert_that((packet.preamble, packet.length, packet.packet_type,
                      packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x06, None, None, None, [], None)))
+                    equal_to((Preamble.ACK, None, None, None, [], None)))
         # Validate checksum
         assert_that(packet.validate_checksum(), equal_to(True))
 
         # Check contents
-        assert_that(packet.bytes(), equal_to(bytearray([0x06])))
+        assert_that(packet.bytes(), equal_to(bytearray([Preamble.ACK])))
 
-        # Check string functions work correctly
+        # Check properties
+        assert_that(packet.special, equal_to(True))
+        assert_that(packet.request, equal_to(False))
+        assert_that(packet.response, equal_to(False))
+
+        # Check string functions work without error
         string = "%s %r" % (packet, packet)
 
-    def test_partial_message(self):
-        """Partial messages from errors"""
-
-        ############################# Only length #############################
-        packet = Packet(0x01, length=0x03)
+    def test_nak_message(self):
+        """Create PacketNAK"""
+        packet = PacketNAK()
 
         # Check fields
         assert_that((packet.preamble, packet.length, packet.packet_type,
                      packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x01, 0x03, None, None, [], None)))
-        # Validate checksum
-        assert_that(packet.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(packet.bytes(), equal_to(bytearray([0x01, 0x03])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (packet, packet)
-
-        ########################## With message type ##########################
-        packet = Packet(0x01, length=0x03, packet_type=0x01)
-
-        # Check fields
-        assert_that((packet.preamble, packet.length, packet.packet_type,
-                     packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x01, 0x03, 0x01, None, [], None)))
-        # Validate checksum
-        assert_that(packet.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(packet.bytes(), equal_to(bytearray([0x01, 0x03, 0x01])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (packet, packet)
-
-        ##################### With controller message type ####################
-        packet = Packet(0x01, length=0x03, packet_type=0x01, message_type=0x02)
-
-        # Check fields
-        assert_that((packet.preamble, packet.length, packet.packet_type,
-                     packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x01, 0x03, 0x01, 0x02, [], None)))
-        # Validate checksum
-        assert_that(packet.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(packet.bytes(), equal_to(bytearray([0x01, 0x03, 0x01,
-                                                        0x02])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (packet, packet)
-
-        ############################## With body ##############################
-        packet = Packet(0x01, length=0x03, packet_type=0x01, message_type=0x02,
-                        body=[0x04, 0x05])
-
-        # Check fields
-        assert_that((packet.preamble, packet.length, packet.packet_type,
-                     packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x01, 0x03, 0x01, 0x02, [0x04, 0x05], None)))
-        # Validate checksum
-        assert_that(packet.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(packet.bytes(), equal_to(bytearray([0x01, 0x03, 0x01, 0x02,
-                                                        0x04, 0x05])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (packet, packet)
-
-        ############################ With checksum ############################
-        packet = Packet(0x01, length=0x03, packet_type=0x01, message_type=0x02,
-                        body=[0x04, 0x05], checksum=0x34)
-
-        # Check fields
-        assert_that((packet.preamble, packet.length, packet.packet_type,
-                     packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x01, 0x03, 0x01, 0x02, [0x04, 0x05], 0x34)))
-        # Validate checksum
-        assert_that(packet.validate_checksum(), equal_to(False))
-
-        # Check contents
-        assert_that(packet.bytes(), equal_to(bytearray([0x01, 0x03, 0x01, 0x02,
-                                                        0x04, 0x05, 0x34])))
-
-        # Check string functions work correctly
-        string = "%s %r" % (packet, packet)
-
-    def test_create_message_no_body(self):
-        """Create message with no body"""
-        packet = Packet.create(packet_type=0x00, message_type=0x02)
-
-        # Check fields
-        assert_that((packet.preamble, packet.length, packet.packet_type,
-                     packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x01, 0x03, 0x00, 0x02, [], 0xfe)))
+                    equal_to((Preamble.NAK, None, None, None, [], None)))
         # Validate checksum
         assert_that(packet.validate_checksum(), equal_to(True))
 
-    def test_create_message_with_body(self):
-        """Create message with a body"""
-        # NOTE: bad preamble, but continue
-        packet = Packet.create(preamble=0x04, packet_type=0x00,
-                               message_type=0x02, body=[0x45, 0x78])
+        # Check contents
+        assert_that(packet.bytes(), equal_to(bytearray([Preamble.NAK])))
+
+        # Check properties
+        assert_that(packet.special, equal_to(True))
+        assert_that(packet.request, equal_to(False))
+        assert_that(packet.response, equal_to(False))
+
+        # Check string functions work without error
+        string = "%s %r" % (packet, packet)
+
+    def test_can_message(self):
+        """Create PacketCAN"""
+        packet = PacketCAN()
 
         # Check fields
         assert_that((packet.preamble, packet.length, packet.packet_type,
                      packet.message_type, packet.body, packet.checksum),
-                    equal_to((0x04, 0x05, 0x00, 0x02, [0x45, 0x78], 0xc5)))
+                    equal_to((Preamble.CAN, None, None, None, [], None)))
+        # Validate checksum
+        assert_that(packet.validate_checksum(), equal_to(True))
+
+        # Check contents
+        assert_that(packet.bytes(), equal_to(bytearray([Preamble.CAN])))
+
+        # Check properties
+        assert_that(packet.special, equal_to(True))
+        assert_that(packet.request, equal_to(False))
+        assert_that(packet.response, equal_to(False))
+
+        # Check string functions work without error
+        string = "%s %r" % (packet, packet)
+
+    def test_single_byte_packet_errors(self):
+        """Single byte Packet errors"""
+        for p in (Preamble.ACK, Preamble.NAK, Preamble.CAN):
+
+            # No length allowed
+            assert_that(calling(Packet).with_args(p, length=1),
+                        raises(ValueError))
+
+            # No packet_type allowed
+            assert_that(calling(Packet).with_args(p, packet_type=PacketType.REQUEST),
+                        raises(ValueError))
+
+            # No message_type allowed
+            assert_that(calling(Packet).with_args(p, message_type=MessageType.ZW_SEND_DATA),
+                        raises(ValueError))
+
+            # No body allowed
+            assert_that(calling(Packet).with_args(p, body=[]),
+                        raises(ValueError))
+
+            # No checksum allowed
+            assert_that(calling(Packet).with_args(p, checksum=0x23),
+                        raises(ValueError))
+
+    def test_multi_byte_packet_errors(self):
+        """Multi byte Packet errors"""
+
+        # Not SOF and unknown
+        assert_that(calling(Packet).with_args(
+            0x23, length=0x03, packet_type=PacketType.REQUEST,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xfe),
+            raises(ValueError))
+
+        # Not SOF, but known
+        assert_that(calling(Packet).with_args(
+            Preamble.ACK, length=0x03, packet_type=PacketType.REQUEST,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xfe),
+            raises(ValueError))
+
+        # Missing length
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, packet_type=PacketType.REQUEST,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xfd),
+            raises(ValueError))
+
+        # Bad length
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x04, packet_type=PacketType.REQUEST,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xf9),
+            raises(ValueError))
+
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x05, packet_type=PacketType.REQUEST,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, body=[0x67],
+            checksum=0x9f),
+            raises(ValueError))
+
+        # Missing packet_type
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x02,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xff),
+            raises(ValueError))
+
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x03,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xfe),
+            raises(ValueError))
+
+        # Unknown packet_type
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x03, packet_type=0x03,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xfd),
+            raises(ValueError))
+
+        # Missing message_type
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x02, packet_type=PacketType.REQUEST,
+            checksum=0xfd),
+            raises(ValueError))
+
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x03, packet_type=PacketType.REQUEST,
+            checksum=0xfc),
+            raises(ValueError))
+
+        # Unknown message_type
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x03, packet_type=PacketType.REQUEST,
+            message_type=0xff, checksum=0x03),
+            raises(ValueError))
+
+        # Bad checksum
+        assert_that(calling(Packet).with_args(
+            Preamble.SOF, length=0x03, packet_type=PacketType.REQUEST,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA, checksum=0xfd),
+            raises(ValueError))
+
+    def test_create_packet_with_bad_body(self):
+        """Create packet with bad body byte"""
+
+        # > 0xff
+        assert_that(calling(Packet.create).with_args(
+            packet_type=PacketType.RESPONSE,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA,
+            body=[256]), raises(ValueError))
+
+        # < 0x00
+        assert_that(calling(Packet.create).with_args(
+            packet_type=PacketType.RESPONSE,
+            message_type=MessageType.SERIAL_API_GET_INIT_DATA,
+            body=[-1]), raises(ValueError))
+
+    def test_create_packet_no_body(self):
+        """Create packet with no body"""
+        packet = Packet.create(packet_type=PacketType.REQUEST,
+                               message_type=MessageType.SERIAL_API_GET_INIT_DATA)
+
+        # Check fields
+        assert_that((packet.preamble, packet.length, packet.packet_type,
+                     packet.message_type, packet.body, packet.checksum),
+                    equal_to((Preamble.SOF, 0x03, PacketType.REQUEST,
+                              MessageType.SERIAL_API_GET_INIT_DATA, [], 0xfe)))
+
+        # Check contents
+        assert_that(packet.bytes(), equal_to(
+            bytearray([Preamble.SOF, 0x03, PacketType.REQUEST,
+                       MessageType.SERIAL_API_GET_INIT_DATA, 0xfe])))
+
+        # Check properties
+        assert_that(packet.special, equal_to(False))
+        assert_that(packet.request, equal_to(True))
+        assert_that(packet.response, equal_to(False))
+
+        # Validate checksum
+        assert_that(packet.validate_checksum(), equal_to(True))
+
+    def test_create_packet_with_body(self):
+        """Create packet with a body"""
+        packet = Packet.create(packet_type=PacketType.RESPONSE,
+                               message_type=MessageType.SERIAL_API_GET_INIT_DATA,
+                               body=[0x45, 0x78])
+
+        # Check fields
+        assert_that((packet.preamble, packet.length, packet.packet_type,
+                     packet.message_type, packet.body, packet.checksum),
+                    equal_to((Preamble.SOF, 0x05, PacketType.RESPONSE,
+                              MessageType.SERIAL_API_GET_INIT_DATA,
+                              [0x45, 0x78], 0xc4)))
+
+        # Check contents
+        assert_that(packet.bytes(), equal_to(
+            bytearray([Preamble.SOF, 0x05, PacketType.RESPONSE,
+                       MessageType.SERIAL_API_GET_INIT_DATA, 0x45, 0x78,
+                       0xc4])))
+
+        # Check properties
+        assert_that(packet.special, equal_to(False))
+        assert_that(packet.request, equal_to(False))
+        assert_that(packet.response, equal_to(True))
+
         # Validate checksum
         assert_that(packet.validate_checksum(), equal_to(True))
 
@@ -199,18 +303,24 @@ class TestPacketParser(object):
     def test_unknown_packet_type(self):
         """Unknown packet type"""
         # SOF
-        assert_that(self.parser.update(0x01), none())
+        assert_that(self.parser.update(Preamble.SOF), none())
         # Length
         assert_that(self.parser.update(0x03), none())
         # Bad packet type
         assert_that(calling(self.parser.update).with_args(0x02),
-                    raises(PacketParserUnknownType))
+                    raises(PacketParserUnknownPacketType))
 
     def test_unknown_message_type(self):
         """Unknown message type"""
-        # Should be handled graceully with a warning in the log
-        packet = (b'\x01\x03\x00\xFF\x03')
-        assert_that(self.parse_packet(packet), not_none())
+        # SOF
+        assert_that(self.parser.update(Preamble.SOF), none())
+        # Length
+        assert_that(self.parser.update(0x03), none())
+        # Packet type REQUEST
+        assert_that(self.parser.update(PacketType.REQUEST), none())
+        # Bad message type
+        assert_that(calling(self.parser.update).with_args(0xff),
+                    raises(PacketParserUnknownMessageType))
 
     def test_ack(self):
         """ACK packet"""
@@ -256,6 +366,7 @@ class TestPacketParser(object):
         assert_that(self.parser.update(0x01), none())
         assert_that(self.parser.update(0x02), none())
         packet = self.parser.update(0xff)
+        assert_that(packet, instance_of(Packet))
 
         assert_that(packet.preamble, equal_to(0x01))
         assert_that(packet.length, equal_to(3))

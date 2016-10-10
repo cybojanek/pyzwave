@@ -17,7 +17,11 @@ This file is part of pyzwave.
     along with pyzwave.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from typing import ByteString
+from typing import List
+
 import logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +29,12 @@ logger = logging.getLogger(__name__)
 class Preamble(object):
     """Preamble bytes at the begining of a packet
 
-    SOF - start of frame
-    ACK - acknowledgement
-    NAK - not acknowledged
-    CAN - can't send
+    Attributes:
+        SOF (int): start of frame
+        ACK (int): acknowledged
+        NAK (int): not acknowledged
+        CAN (int): can't acknowledge
+        ALL (:obj:`set` of :obj:`int`): all preamble types
 
     """
     SOF = 0x01
@@ -42,8 +48,10 @@ class Preamble(object):
 class PacketType(object):
     """Type of packet, request or response
 
-    REQUEST - request
-    RESPONSE - response
+    Attributes:
+        REQUEST (int): request
+        RESPONSE (int): response
+        ALL (:obj:`set` of :obj:`int`): all packet types
 
     """
     REQUEST = 0x00
@@ -55,46 +63,63 @@ class PacketType(object):
 class MessageType(object):
     """Specific API call
 
+    Attributes:
+        NONE (int):
+        SERIAL_API_GET_INIT_DATA (int):
+        APPLICATION_COMMAND_HANDLER (int):
+        ZW_GET_CONTROLLER_CAPABILITIES (int):
+        SERIAL_API_GET_CAPABILITIES (int):
+        ZW_SEND_DATA (int):
+        ZW_APPLICATION_UPDATE (int):
+        ALL (:obj:`set` of :obj:`int`): all message types
+
     """
     NONE = 0x00
     SERIAL_API_GET_INIT_DATA = 0x02
+    APPLICATION_COMMAND_HANDLER = 0x04
     ZW_GET_CONTROLLER_CAPABILITIES = 0x05
     SERIAL_API_GET_CAPABILITIES = 0x07
     ZW_SEND_DATA = 0x13
+    ZW_APPLICATION_UPDATE = 0x49
 
-    ALL = set([NONE, SERIAL_API_GET_INIT_DATA, ZW_GET_CONTROLLER_CAPABILITIES,
-               SERIAL_API_GET_CAPABILITIES, ZW_SEND_DATA])
+    ALL = set([NONE, SERIAL_API_GET_INIT_DATA, APPLICATION_COMMAND_HANDLER,
+               ZW_GET_CONTROLLER_CAPABILITIES, SERIAL_API_GET_CAPABILITIES,
+               ZW_SEND_DATA, ZW_APPLICATION_UPDATE])
 
 
 class Packet(object):
     """A ZWave packet
+
+    Args:
+        preamble (int):
+        length (int, optional): default is None
+        packet_type (int, optional): PacketType, defeault is None
+        message_type (int, optional): MessageType, default is None
+        body (:obj:`list` of :obj:`int`, optional): default is empty list
+        checksum (int, optional): default is None
 
     Attributes:
         preamble (int): Preamble
         length (int): can be None
         packet_type (int): PacketType can be None
         message_type (int): MessageType can be None
-        body (list(int)): bytes of body
+        body (:obj:`list` of :obj:`int`): bytes of body
         checksum (int): can be None
+
+        special (bool): if one of ACK, NAK, CAN
+        request (bool): if PacketType.REQUEST
+        response (bool): if PacketType.RESPONSE
+
+    Raises:
+        ValueError: if packet bytes are invalid
 
     """
 
-    def __init__(self, preamble, length=None, packet_type=None,
-                 message_type=None, body=None, checksum=None):
-        """New ZWave packet
-
-        Arguments:
-            preamble (int):
-
-        Keyword Arguments:
-            length (int): default is None
-            packet_type (int): PacketType, defeault is None
-            message_type (int): MessageType, default is None
-            body (list(int)): default is empty list
-            checksum (int): default is None
-
-        """
+    def __init__(self, preamble: int, length: int=None, packet_type: int=None,
+                 message_type: int=None, body: List[int]=None,
+                 checksum: int=None):
         super(Packet, self).__init__()
+
         self.preamble = preamble
         self.length = length
         self.packet_type = packet_type
@@ -102,7 +127,58 @@ class Packet(object):
         self.body = body or list()
         self.checksum = checksum
 
-    def validate_checksum(self):
+        # Check preamble
+        if (preamble in (Preamble.ACK, Preamble.NAK, Preamble.CAN)):
+            # Single byte packet
+            if ((length, packet_type, message_type, body, checksum) !=
+                    (None, None, None, None, None)):
+                raise ValueError('ACK, NAK, CAN must be single byte packets')
+        else:
+            # Only SOF
+            if preamble != Preamble.SOF:
+                raise ValueError('Unknown Preamble:0x%02x' % (preamble))
+
+            # Length is: packet_type + message_type + body + checksum
+            if length is None:
+                raise ValueError('Length cannot be None')
+            if 3 + len(self.body) != length:
+                raise ValueError('Length does not match: 0x%02x != 0x%02x' % (
+                                 length, 3 + len(self.body)))
+
+            # Must be known
+            if packet_type is None:
+                raise ValueError('Packet type for SOF cannot be None')
+            if packet_type not in PacketType.ALL:
+                raise ValueError('Unknown packet type: 0x%02x' % (packet_type))
+
+            # Must be known
+            if message_type is None:
+                raise ValueError('Packet type for SOF cannot be None')
+            if message_type not in MessageType.ALL:
+                raise ValueError('Unknown message type: 0x%02x' % (
+                    message_type))
+
+            # Only allow bytes within [0x00, 0xff]
+            if len(list(filter(lambda x: x < 0 or x > 255, self.body))) > 0:
+                raise ValueError('Body contains non-byte range values')
+
+            # Checksum
+            if not self.validate_checksum():
+                raise ValueError('Checksum failed to validate')
+
+    @property
+    def special(self) -> bool:
+        return (self.preamble in (Preamble.ACK, Preamble.NAK, Preamble.CAN))
+
+    @property
+    def request(self) -> bool:
+        return (self.packet_type == PacketType.REQUEST)
+
+    @property
+    def response(self) -> bool:
+        return (self.packet_type == PacketType.RESPONSE)
+
+    def validate_checksum(self) -> bool:
         """Check if checksum validates for message. If preamble is ACK, NAK, or
         CAN, then the checksum always validates, because there is none
 
@@ -111,7 +187,7 @@ class Packet(object):
 
         """
         # No checksum, validates if not SOF
-        if self.checksum is None and self.preamble != Preamble.SOF:
+        if self.checksum is None and self.special:
             return True
 
         # Skip preamble and checksum
@@ -124,11 +200,11 @@ class Packet(object):
         # Compare
         return check == self.checksum
 
-    def bytes(self):
+    def bytes(self) -> bytes:
         """Get the bytes that form this packet
 
-        Return:
-            bytearray
+        Returns:
+            bytes
 
         """
         b = bytearray()
@@ -145,12 +221,11 @@ class Packet(object):
             b.append(self.checksum)
         return b
 
-    @staticmethod
-    def create(preamble=Preamble.SOF, packet_type=None, message_type=None,
-               body=None):
+    @classmethod
+    def create(cls, preamble: int=Preamble.SOF, packet_type: int=None,
+               message_type: int=None, body: List[int]=None) -> 'Packet':
         """Create a Packet. The checksum is filled in based on the given
-        parameters. Note that no logic checks exist to validate the message,
-        i.e. you can create an ACK with a body and checksum...
+        parameters.
 
         Keyword Arguments:
             preamble (int): Preamble, default is SOF
@@ -162,7 +237,6 @@ class Packet(object):
             Packet
 
         """
-
         length = None
         checksum = None
 
@@ -181,26 +255,20 @@ class Packet(object):
         if computed_length > 0:
             # Length is bytes to checksum and checksum
             length = computed_length + 1
-
-            # Skip preamble and start at 0xff
-            check = 0xff
-            # Length
-            check ^= length
-            # Packet type
-            if packet_type is not None:
-                check ^= packet_type
-            # Message type
-            if message_type is not None:
-                check ^= message_type
-            # Body
-            if body is not None:
-                for x in body:
-                    check ^= x
-            # Final checksum
-            checksum = check
+            checksum = Packet.compute_checksum(length, packet_type,
+                                               message_type, body)
 
         return Packet(preamble, length=length, packet_type=packet_type,
                       message_type=message_type, body=body, checksum=checksum)
+
+    @classmethod
+    def compute_checksum(cls, length: int, packet_type: int, message_type: int,
+                         body: List[int]=None):
+        check = 0xff ^ length ^ packet_type ^ message_type
+        if body is not None:
+            for x in body:
+                check ^= x
+        return check
 
     def __str__(self):
         return 'Packet: P:[0x%02x] L:[%s] T:[%s] M:[%s] B:[%s] C:[%s]' % (
@@ -250,43 +318,11 @@ class PacketParserException(Exception):
 
     Attributes:
         error (str): message
-        packet (Packet): malformed Packet
 
     """
 
-    def __init__(self, error, packet):
+    def __init__(self, error: str):
         super(PacketParserException, self).__init__(error)
-        self.packet = packet
-
-
-class PacketParserUnknownPreamble(PacketParserException):
-    """PacketParser error due to unsupported Preamble
-
-    """
-
-    def __init__(self, preamble):
-        super(PacketParserUnknownPreamble, self).__init__(
-                'Unknown packet preamble [0x%02x]' % (preamble), None)
-
-
-class PacketParserUnknownType(PacketParserException):
-    """PacketParser error due to unsupported PacketType
-
-    """
-
-    def __init__(self, packet_type, packet):
-        super(PacketParserUnknownType, self).__init__(
-                'Unknown packet type [0x%02x]' % (packet_type), packet)
-
-
-class PacketParserBadChecksum(PacketParserException):
-    """PacketParser error due to a bad checksum
-
-    """
-
-    def __init__(self, packet):
-        super(PacketParserBadChecksum, self).__init__('Bad packet checksum',
-                                                      packet)
 
 
 class PacketParserBadLength(PacketParserException):
@@ -294,9 +330,49 @@ class PacketParserBadLength(PacketParserException):
 
     """
 
-    def __init__(self, packet):
-        super(PacketParserBadLength, self).__init__('Packet too length',
-                                                    packet)
+    def __init__(self, length: int):
+        super(PacketParserBadLength, self).__init__(
+            'Bad packet length [0x%02x]' % (length))
+
+
+class PacketParserUnknownPreamble(PacketParserException):
+    """PacketParser error due to unsupported Preamble
+
+    """
+
+    def __init__(self, preamble: int):
+        super(PacketParserUnknownPreamble, self).__init__(
+            'Unknown packet preamble [0x%02x]' % (preamble))
+
+
+class PacketParserUnknownPacketType(PacketParserException):
+    """PacketParser error due to unsupported PacketType
+
+    """
+
+    def __init__(self, packet_type: int):
+        super(PacketParserUnknownPacketType, self).__init__(
+            'Unknown packet type [0x%02x]' % (packet_type))
+
+
+class PacketParserUnknownMessageType(PacketParserException):
+    """PacketParser error due to unsupported MessageType
+
+    """
+
+    def __init__(self, message_type: int):
+        super(PacketParserUnknownMessageType, self).__init__(
+            'Unknown message type [0x%02x]' % (message_type))
+
+
+class PacketParserBadChecksum(PacketParserException):
+    """PacketParser error due to a bad checksum
+
+    """
+
+    def __init__(self, checksum: int):
+        super(PacketParserBadChecksum, self).__init__(
+            'Bad packet checksum [0x%02x]' % (checksum))
 
 
 class PacketParser(object):
@@ -304,7 +380,7 @@ class PacketParser(object):
 
     Attributes:
         packet (Packet): ongoing packet
-        state (int): current packet parsing state
+        state (int): current packet parsing state one of PacketParser.State
 
     """
 
@@ -312,6 +388,7 @@ class PacketParser(object):
         """Internal parsing state
 
         Attributes:
+
             PREAMBLE (int): waiting for Preamble byte
             LENGTH (int): waiting for length
             PACKET_TYPE (int): waiting for PacketType
@@ -329,34 +406,33 @@ class PacketParser(object):
 
     def __init__(self):
         super(PacketParser, self).__init__()
-        self.packet = None
-        self.state = PacketParser.State.PREAMBLE
+        self._reset_state()
 
     def _reset_state(self):
         """Reset state and return current packet
 
-        Return:
-            Packet
-
         """
-        packet, self.packet = self.packet, None
-        self.state = PacketParser.State.PREAMBLE
-        return packet
+        self._state = PacketParser.State.PREAMBLE
+        self._length = 0
+        self._packet_type = 0
+        self._message_type = 0
+        self._body = list()
+        self._checksum = 0
 
-    def update(self, n):
+    def update(self, n: int) -> Packet:
         """Update the parse state
 
         Arguments:
             n (int): byte value
 
-        Return:
-            Packet if finished parsing, else None
+        Returns:
+            Packet: if finished parsing, else None
 
         Raises:
             ValueError: if n is not in range of [0, 255]
             PacketParserUnknownPreamble; if bad Preamble
             PacketParserBadLength: if bad length
-            PacketParserUnknownType: if unknown PacketType
+            PacketParserUnknownPacketType: if unknown PacketType
             PacketParserBadChecksum: if bad checksum
 
         """
@@ -365,75 +441,89 @@ class PacketParser(object):
         if (n < 0 or n > 255):
             raise ValueError('n must be within byte range of [0, 255]')
 
-        if self.state == PacketParser.State.PREAMBLE:
+        if self._state == PacketParser.State.PREAMBLE:
             # Got preamble
             if n not in Preamble.ALL:
+                self._reset_state()
                 raise PacketParserUnknownPreamble(n)
 
             if n == Preamble.ACK:
                 # ACKs are just 0x06
+                self._reset_state()
                 return PacketACK()
             elif n == Preamble.NAK:
                 # NACKs are just 0x15
+                self._reset_state()
                 return PacketNAK()
             elif n == Preamble.CAN:
                 # CANs are just 0x18
+                self._reset_state()
                 return PacketCAN()
-            else:
-                # Create new packet
-                self.packet = Packet(n)
-                self.state = PacketParser.State.LENGTH
+            else: # SOF
+                self._state = PacketParser.State.LENGTH
 
-        elif self.state == PacketParser.State.LENGTH:
+        elif self._state == PacketParser.State.LENGTH:
             # Got length
-
-            self.packet.length = n
+            self._length = n
 
             if n in (0, 1, 2):
-                raise PacketParserBadLength(self._reset_state())
+                self._reset_state()
+                raise PacketParserBadLength(n)
             else:
-                self.state = PacketParser.State.PACKET_TYPE
+                self._state = PacketParser.State.PACKET_TYPE
 
-        elif self.state == PacketParser.State.PACKET_TYPE:
+        elif self._state == PacketParser.State.PACKET_TYPE:
             # Got packet type
 
             if n not in PacketType.ALL:
                 # Reset
-                raise PacketParserUnknownType(n, self._reset_state())
+                self._reset_state()
+                raise PacketParserUnknownPacketType(n)
             else:
                 # Set packet type
-                self.packet.packet_type = n
-                self.state = PacketParser.State.MESSAGE_TYPE
+                self._packet_type = n
+                self._state = PacketParser.State.MESSAGE_TYPE
 
-        elif self.state == PacketParser.State.MESSAGE_TYPE:
-            # Got controller packet type
+        elif self._state == PacketParser.State.MESSAGE_TYPE:
+            # Got message type
+
             if n not in MessageType.ALL:
-                logger.warn('Unknown byte [%02x] waiting for message type ', n)
+                self._reset_state()
+                raise PacketParserUnknownMessageType(n)
 
-            self.packet.message_type = n
+            self._message_type = n
 
             # Done, because message type counts towards length
-            if self.packet.length == 3:
+            if self._length == 3:
                 # Just get checksum
-                self.state = PacketParser.State.CHECKSUM
+                self._state = PacketParser.State.CHECKSUM
             else:
                 # Get body bytes
-                self.state = PacketParser.State.BODY
+                self._state = PacketParser.State.BODY
 
-        elif self.state == PacketParser.State.BODY:
+        elif self._state == PacketParser.State.BODY:
             # Get body byte
-            self.packet.body.append(n)
+            self._body.append(n)
 
             # Subtract 3 for: packet type, message type, checksum
-            if len(self.packet.body) == self.packet.length - 3:
-                self.state = PacketParser.State.CHECKSUM
+            if len(self._body) == self._length - 3:
+                self._state = PacketParser.State.CHECKSUM
 
-        else:  # self.state == PacketParser.State.CHECKSUM
+        else:  # self._state == PacketParser.State.CHECKSUM
             # Got checksum
-            self.packet.checksum = n
+            self._checksum = n
+            checksum = Packet.compute_checksum(
+                self._length, self._packet_type, self._message_type,
+                self._body)
 
             # Return and reset
-            if not self.packet.validate_checksum():
-                raise PacketParserBadChecksum(self._reset_state())
+            if self._checksum != checksum:
+                self._reset_state()
+                raise PacketParserBadChecksum(self._checksum)
             else:
-                return self._reset_state()
+                packet = Packet(Preamble.SOF, length=self._length,
+                                packet_type=self._packet_type,
+                                message_type=self._message_type,
+                                body=self._body, checksum=self._checksum)
+                self._reset_state()
+                return packet

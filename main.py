@@ -4,11 +4,12 @@ import sys
 import serial
 
 from zwave.controller import ZWaveController
+from zwave.message import BasicCommand
+from zwave.message import SerialAPIGetCapabilities
+from zwave.message import SerialAPIGetInitData
+from zwave.message import ZWGetControllerCapabilities
 from zwave.packet import Packet, Preamble, PacketType, MessageType
 from zwave.packet import PacketACK, PacketNAK, PacketCAN
-from zwave.message import SerialAPIGetInitData
-from zwave.message import SerialAPIGetCapabilities
-from zwave.message import ZWGetControllerCapabilities
 
 
 def discover(z, args):
@@ -24,7 +25,7 @@ def discover(z, args):
     # Reply
     packet = z.read()
     if packet.preamble != Preamble.SOF:
-        sys.stderr.write('Failed to get SOF packet: %s' % (packet))
+        sys.stderr.write('Failed to get SOF: %s' % (packet))
         sys.exit(1)
     print(packet)
 
@@ -90,8 +91,62 @@ def discover(z, args):
     # Close
     z.close()
 
+
 def switch(z, args):
-    print('Switch!')
+    # Write request
+    if args.mode in ('on', 'off'):
+        value = 0x00 if args.mode == 'off' else 0xff
+        z.write(BasicCommand.create_request_set(args.node_id, value,
+                                                callback_id=0x34))
+
+        packet = z.read()
+        if packet.preamble != Preamble.ACK:
+            sys.stderr.write('Failed to get ACK: %s' % (packet))
+            sys.exit(1)
+
+        # Get controller confirmation
+        packet = z.read()
+        # Get switch confirmation
+        packet = z.read()
+
+        while packet is not None:
+            packet = z.read()
+            print(packet)
+    else:
+        z.write(BasicCommand.create_request_get(args.node_id, callback_id=0x34))
+        packet = z.read()
+        if packet.preamble != Preamble.ACK:
+            sys.stderr.write('Failed to get ACK: %s' % (packet))
+            sys.exit(1)
+
+        # Get controller confirmation
+        packet = z.read()
+        print(packet)
+        # Get switch confirmation
+        packet = z.read()
+        print(packet)
+        # Get report
+        packet = z.read()
+        print(packet)
+
+        while packet is not None:
+            packet = z.read()
+            print(packet)
+
+        # TODO: fixme, expecting reply...
+        if packet.body[-1] != 0x00:
+            print("on")
+        else:
+            print("off")
+
+    # Close
+    z.close()
+
+
+def listen(z, args):
+    while True:
+        packet = z.read()
+        print('Received: %s\n%r\n' % (packet, packet))
 
 
 def main():
@@ -109,7 +164,10 @@ def main():
     parser_switch.set_defaults(func=switch)
     parser_switch.add_argument('node_id', type=int, choices=range(1, 233),
                                 help='Node ID in the range of [1, 232]')
-    parser_switch.add_argument('mode', choices=['on', 'off'])
+    parser_switch.add_argument('mode', choices=['on', 'off', 'status'])
+
+    listen_switch = subparsers.add_parser('listen')
+    listen_switch.set_defaults(func=listen)
 
     args = parser.parse_args()
 
@@ -118,6 +176,7 @@ def main():
         z = ZWaveController(args.device)
     except serial.serialutil.SerialException:
         sys.stderr.write('Serial device [%s] not found' % (args.device))
+        sys.exit(1)
 
     args.func(z, args)
 
